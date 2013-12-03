@@ -59,6 +59,7 @@
 #include <yarp/os/RpcClient.h>
 #include <yarp/os/RpcServer.h>
 #include <yarp/os/Wire.h>
+#include <yarp/os/Things.h>
 
 #endif
 
