@@ -18,6 +18,8 @@
 #include <glibmm/ustring.h>
 #include <stdexcept>
 
+#include <sstream>
+
 namespace {
     static const int default_portscope_rows = 1;
     static const int default_portscope_columns = 1;
@@ -45,6 +47,8 @@ namespace {
 
 YarpScope::XmlLoader::XmlLoader(const Glib::ustring& filename)
 {
+    using std::string;
+
     YarpScope::PortReader &portReader = YarpScope::PortReader::instance();
     YarpScope::PlotManager &plotManager = YarpScope::PlotManager::instance();
 
@@ -147,18 +151,18 @@ YarpScope::XmlLoader::XmlLoader(const Glib::ustring& filename)
             }
 
             Glib::ustring graph_remote, graph_title, graph_color, graph_type;
-            int graph_index, graph_size;
             if (const char *t = graphElem->Attribute("remote")) {
                 graph_remote = t;
             } else {
                 fatal() << "Syntax error while loading" << filename << ". \"remote\" attribute not found in element \"graph\"";
             }
-            if (graphElem->QueryIntAttribute("index", &graph_index) != TIXML_SUCCESS) {
+
+            // Graph data indexes to plot
+            string graph_indexes;
+            if (graphElem->QueryStringAttribute("index", &graph_indexes) != TIXML_SUCCESS) {
                 fatal() << "Syntax error while loading" << filename << ". \"index\" attribute not found in element \"graph\"";
             }
-            if (graph_index < 0) {
-                fatal() << "Syntax error while loading" << filename << ". \"index\" attribute in element \"graph\" should be >= 0";
-            }
+
             if (const char *t = graphElem->Attribute("title")) {
                 graph_title = t;
             }
@@ -170,12 +174,61 @@ YarpScope::XmlLoader::XmlLoader(const Glib::ustring& filename)
             } else {
                 graph_type = default_graph_type;
             }
+            int graph_size;
             if (graphElem->QueryIntAttribute("size", &graph_size) != TIXML_SUCCESS || graph_size <= 0) {
                 graph_size = default_graph_size;
             }
 
-            portReader.acquireData(graph_remote, graph_index, "", portscope_carrier, portscope_persistent);
-            plotManager.addGraph(plotIndex, graph_remote, graph_index, graph_title, graph_color, graph_type, graph_size);
+            // Split indexes string
+            string delimiters = "-";
+            int start = 0;
+            int end = 0;
+            if (graph_indexes.size() > 0) {
+                // Find delimiter "-"
+                size_t curPos = graph_indexes.find_first_of(delimiters);
+                std::cout << "Start position " << curPos << "\n";
+                if (curPos == string::npos) {
+                    // Only one index specified
+                    if (string2int(graph_indexes, start)) {
+                        end = start;
+                    } else {
+                        std::ostringstream err;
+                        err << "Syntax error while loading" << filename << ". Invalid \"index\" specified " << graph_indexes;
+                        fatal() << err.str().c_str();
+                    }
+                } else {
+                    // Index range specified
+                    string tmpIndexS = graph_indexes.substr(0, curPos);
+                    string tmpIndexE = graph_indexes.substr(curPos+1, string::npos);
+                    // Convert start index
+                    if (!string2int(tmpIndexS, start)) {
+                        std::ostringstream err;
+                        err << "Syntax error while loading" << filename << ". Invalid starting index \"" << tmpIndexS << "\" specified in the \"index\" attribute.";
+                        fatal() << err.str().c_str();
+                    }
+                    // Convert end index
+                    if (!string2int(tmpIndexE, end)) {
+                        std::ostringstream err;
+                        err << "Syntax error while loading" << filename << ". Invalid end index \"" << tmpIndexE << "\" specified in the \"index\" attribute.";
+                        fatal() << err.str().c_str();
+                    }
+
+                    // Check for correct index range
+                    if (start <= end) {
+                        std::cout << "Plotting data with start index " << start << " and end index " << end << "\n";
+                    } else {
+                        std::ostringstream err;
+                        err << "Syntax error while loading" << filename << ". Start index \"" << tmpIndexS << "\" specified in the \"index\" attribute should be smaller than the end index \"" << tmpIndexE << "\".";
+                        fatal() << err.str().c_str();
+                    }
+                }
+            }
+
+            // Add plots
+            for (int i = start; i <= end; ++i) {
+                portReader.acquireData(graph_remote, i, "", portscope_carrier, portscope_persistent);
+                plotManager.addGraph(plotIndex, graph_remote, i, graph_title, graph_color, graph_type, graph_size);
+            }
         }
     }
 
@@ -185,3 +238,20 @@ YarpScope::XmlLoader::XmlLoader(const Glib::ustring& filename)
 YarpScope::XmlLoader::~XmlLoader()
 {
 }
+
+
+/* *********************************************************************************************************************** */
+/* ******* Convert the given string into an integer.                        ********************************************** */
+bool YarpScope::XmlLoader::string2int(const std::string &i_str, int &o_val) {
+    bool ok = false;
+    std::istringstream iss(i_str);
+
+    iss >> std::ws >> o_val >> std::ws;
+
+    if(iss.eof()) {
+        ok = true;
+    }
+
+    return ok;
+}
+/* *********************************************************************************************************************** */
